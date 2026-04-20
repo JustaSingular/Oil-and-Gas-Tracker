@@ -26,12 +26,37 @@ export default function App() {
       // 2. If no cache or it's old, fetch from APIs
       console.log("Cache expired or missing. Fetching new data...");
       
-      const fetchOil = fetch('https://api.oilpriceapi.com/v1/prices/latest', {
-        headers: { 'Authorization': `Token ${import.meta.env.VITE_OIL_TOKEN}` }
-      }).then(res => res.json());
+      // const fetchOil = fetch('https://api.oilpriceapi.com/v1/prices/latest', {
+      //   headers: { 'Authorization': `Token ${import.meta.env.VITE_OIL_TOKEN}` }
+      // }).then(res => res.json());
 
-      const fetchGas = fetch(`https://www.alphavantage.co/query?function=NATURAL_GAS&interval=daily&apikey=${ALPHA_VANTAGE_KEY}`)
-        .then(res => res.json());
+      // const fetchGas = fetch(`https://www.alphavantage.co/query?function=NATURAL_GAS&interval=daily&apikey=${ALPHA_VANTAGE_KEY}`)
+      //   .then(res => res.json());
+
+      // This one call replaces the two separate fetch blocks
+      fetch('/.netlify/functions/get-prices')
+      .then(res => res.json())
+      .then(data => {
+        // We get the cleaned data back from our middleman
+        const oilP = data.oil || 0;
+        const gasP = data.gas || 0;
+
+        setGlobalPrice(oilP);
+        setGasPrice(gasP);
+
+        // Keep your LocalStorage save logic below this
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          oil: oilP,
+          gas: gasP,
+          timestamp: now
+        }));
+
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Fetch error:", err);
+        setLoading(false);
+      });
 
       Promise.all([fetchOil, fetchGas])
         .then(([oilData, gasData]) => {

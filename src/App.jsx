@@ -6,48 +6,57 @@ export default function App() {
   const [gasPrice, setGasPrice] = useState(0); 
   const [loading, setLoading] = useState(true);
 
-  const ALPHA_VANTAGE_KEY = import.meta.env.VITE_ALPHA_KEY;
+  // New state tracking the direction of the price movement ('up', 'down', or 'stable')
+  const [oilTrend, setOilTrend] = useState('stable');
+  const [gasTrend, setGasTrend] = useState('stable');
 
   useEffect(() => {
     const CACHE_KEY = 'energy_dashboard_cache';
-    const SIX_HOURS = 6 * 60 * 60 * 1000; // Time in milliseconds
+    const SIX_HOURS = 6 * 60 * 60 * 1000; 
     const now = Date.now();
 
     const savedCache = localStorage.getItem(CACHE_KEY);
     const cache = savedCache ? JSON.parse(savedCache) : null;
 
-    // 1. Check if we have valid, fresh data in the cache
     if (cache && (now - cache.timestamp < SIX_HOURS)) {
       setGlobalPrice(cache.oil);
       setGasPrice(cache.gas);
+      setOilTrend(cache.oilTrend || 'stable');
+      setGasTrend(cache.gasTrend || 'stable');
       setLoading(false);
       console.log("Loading data from cache to save API credits...");
     } else {
-      // 2. If no cache or it's old, fetch from APIs
       console.log("Cache expired or missing. Fetching new data...");
       
-      // const fetchOil = fetch('https://api.oilpriceapi.com/v1/prices/latest', {
-      //   headers: { 'Authorization': `Token ${import.meta.env.VITE_OIL_TOKEN}` }
-      // }).then(res => res.json());
-
-      // const fetchGas = fetch(`https://www.alphavantage.co/query?function=NATURAL_GAS&interval=daily&apikey=${ALPHA_VANTAGE_KEY}`)
-      //   .then(res => res.json());
-
-      // This one call replaces the two separate fetch blocks
       fetch('/.netlify/functions/get-prices')
       .then(res => res.json())
       .then(data => {
-        // We get the cleaned data back from our middleman
         const oilP = data.oil || 0;
         const gasP = data.gas || 0;
 
+        // Calculate trends based on what was *previously* in the cache
+        let newOilTrend = 'stable';
+        let newGasTrend = 'stable';
+
+        if (cache) {
+          if (oilP > cache.oil) newOilTrend = 'up';
+          if (oilP < cache.oil) newOilTrend = 'down';
+          
+          if (gasP > cache.gas) newGasTrend = 'up';
+          if (gasP < cache.gas) newGasTrend = 'down';
+        }
+
         setGlobalPrice(oilP);
         setGasPrice(gasP);
+        setOilTrend(newOilTrend);
+        setGasTrend(newGasTrend);
 
-        // Keep your LocalStorage save logic below this
+        // Save everything, including trends, to localStorage
         localStorage.setItem(CACHE_KEY, JSON.stringify({
           oil: oilP,
           gas: gasP,
+          oilTrend: newOilTrend,
+          gasTrend: newGasTrend,
           timestamp: now
         }));
 
@@ -57,28 +66,6 @@ export default function App() {
         console.error("Fetch error:", err);
         setLoading(false);
       });
-
-      Promise.all([fetchOil, fetchGas])
-        .then(([oilData, gasData]) => {
-          const oilP = oilData.data ? oilData.data.price : 0;
-          const gasP = (gasData.data && gasData.data.length > 0) ? parseFloat(gasData.data[0].value) : 0;
-
-          setGlobalPrice(oilP);
-          setGasPrice(gasP);
-
-          // Save to LocalStorage for next time
-          localStorage.setItem(CACHE_KEY, JSON.stringify({
-            oil: oilP,
-            gas: gasP,
-            timestamp: now
-          }));
-
-          setLoading(false);
-        })
-        .catch((err) => {
-          console.error("Fetch error:", err);
-          setLoading(false);
-        });
     }
   }, []);
 
@@ -107,6 +94,29 @@ export default function App() {
     textShadow: '0 0 10px rgba(57, 255, 20, 0.5)'
   };
 
+  // Helper component to render the arrows & labels dynamically
+  const TrendIndicator = ({ trend }) => {
+    if (trend === 'up') {
+      return (
+        <Typography variant="body2" sx={{ color: '#39FF14', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+          ▲ Up from last check
+        </Typography>
+      );
+    }
+    if (trend === 'down') {
+      return (
+        <Typography variant="body2" sx={{ color: '#FF3131', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+          ▼ Down from last check
+        </Typography>
+      );
+    }
+    return (
+      <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+        ● Stable
+      </Typography>
+    );
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 4, pt: 5, px: 2, bgcolor: '#000', minHeight: '100vh' }}>
       
@@ -120,9 +130,10 @@ export default function App() {
           {loading ? <CircularProgress size={24} sx={{ color: '#39FF14' }} /> : (
             <Box>
               <Typography variant="h4" sx={neonText}>TT$ {ttdConversionOil}</Typography>
-              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)' }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)', display: 'block' }}>
                 Per Barrel (USD ${globalPrice})
               </Typography>
+              <TrendIndicator trend={oilTrend} />
             </Box>
           )}
         </CardContent>
@@ -196,9 +207,10 @@ export default function App() {
           {loading ? <CircularProgress size={24} sx={{ color: '#39FF14' }} /> : (
             <Box>
               <Typography variant="h4" sx={neonText}>TT$ {ttdConversionGas}</Typography>
-              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)' }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)', display: 'block' }}>
                 Per MMBtu (USD ${gasPrice})
               </Typography>
+              <TrendIndicator trend={gasTrend} />
             </Box>
           )}
         </CardContent>
@@ -243,8 +255,3 @@ export default function App() {
     </Box>
   );
 }
-
-
-//The Energy Chamber of Trinidad & Tobago
-//Central Bank of Trinidad & Tobago
-//National Petroleum Marketing Company (NPMC)

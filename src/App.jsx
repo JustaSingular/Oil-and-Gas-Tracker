@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, Typography, Box, Divider, CircularProgress } from '@mui/material';
+import { Card, CardContent, Typography, Box, CircularProgress } from '@mui/material';
 
 export default function App() {
   const [globalPrice, setGlobalPrice] = useState(0);
   const [gasPrice, setGasPrice] = useState(0); 
   const [loading, setLoading] = useState(true);
 
-  // New state tracking the direction of the price movement ('up', 'down', or 'stable')
-  const [oilTrend, setOilTrend] = useState('stable');
-  const [gasTrend, setGasTrend] = useState('stable');
+  // Track the trend state and the previous price for context
+  const [oilTrend, setOilTrend] = useState({ direction: 'stable', prevPrice: null });
+  const [gasTrend, setGasTrend] = useState({ direction: 'stable', prevPrice: null });
 
   useEffect(() => {
     const CACHE_KEY = 'energy_dashboard_cache';
@@ -21,8 +21,8 @@ export default function App() {
     if (cache && (now - cache.timestamp < SIX_HOURS)) {
       setGlobalPrice(cache.oil);
       setGasPrice(cache.gas);
-      setOilTrend(cache.oilTrend || 'stable');
-      setGasTrend(cache.gasTrend || 'stable');
+      setOilTrend({ direction: cache.oilTrend || 'stable', prevPrice: cache.prevOil || null });
+      setGasTrend({ direction: cache.gasTrend || 'stable', prevPrice: cache.prevGas || null });
       setLoading(false);
       console.log("Loading data from cache to save API credits...");
     } else {
@@ -34,29 +34,34 @@ export default function App() {
         const oilP = data.oil || 0;
         const gasP = data.gas || 0;
 
-        // Calculate trends based on what was *previously* in the cache
-        let newOilTrend = 'stable';
-        let newGasTrend = 'stable';
+        let newOilDirection = 'stable';
+        let newGasDirection = 'stable';
+        let prevOilVal = null;
+        let prevGasVal = null;
 
         if (cache) {
-          if (oilP > cache.oil) newOilTrend = 'up';
-          if (oilP < cache.oil) newOilTrend = 'down';
+          prevOilVal = cache.oil;
+          prevGasVal = cache.gas;
+
+          if (oilP > cache.oil) newOilDirection = 'up';
+          if (oilP < cache.oil) newOilDirection = 'down';
           
-          if (gasP > cache.gas) newGasTrend = 'up';
-          if (gasP < cache.gas) newGasTrend = 'down';
+          if (gasP > cache.gas) newGasDirection = 'up';
+          if (gasP < cache.gas) newGasDirection = 'down';
         }
 
         setGlobalPrice(oilP);
         setGasPrice(gasP);
-        setOilTrend(newOilTrend);
-        setGasTrend(newGasTrend);
+        setOilTrend({ direction: newOilDirection, prevPrice: prevOilVal });
+        setGasTrend({ direction: newGasDirection, prevPrice: prevGasVal });
 
-        // Save everything, including trends, to localStorage
         localStorage.setItem(CACHE_KEY, JSON.stringify({
           oil: oilP,
           gas: gasP,
-          oilTrend: newOilTrend,
-          gasTrend: newGasTrend,
+          oilTrend: newOilDirection,
+          gasTrend: newGasDirection,
+          prevOil: prevOilVal,
+          prevGas: prevGasVal,
           timestamp: now
         }));
 
@@ -94,27 +99,15 @@ export default function App() {
     textShadow: '0 0 10px rgba(57, 255, 20, 0.5)'
   };
 
-  // Helper component to render the arrows & labels dynamically
-  const TrendIndicator = ({ trend }) => {
-    if (trend === 'up') {
-      return (
-        <Typography variant="body2" sx={{ color: '#39FF14', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-          ▲ Up from last check
-        </Typography>
-      );
+  // Helper component to render inline arrows next to pricing
+  const InlineTrendArrow = ({ trend }) => {
+    if (trend.direction === 'up') {
+      return <Box component="span" sx={{ color: '#39FF14', ml: 1, fontSize: '0.8em' }}>▲</Box>;
     }
-    if (trend === 'down') {
-      return (
-        <Typography variant="body2" sx={{ color: '#FF3131', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-          ▼ Down from last check
-        </Typography>
-      );
+    if (trend.direction === 'down') {
+      return <Box component="span" sx={{ color: '#FF3131', ml: 1, fontSize: '0.8em' }}>▼</Box>;
     }
-    return (
-      <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-        ● Stable
-      </Typography>
-    );
+    return <Box component="span" sx={{ color: 'rgba(255,255,255,0.3)', ml: 1, fontSize: '0.8em' }}>●</Box>;
   };
 
   return (
@@ -129,11 +122,18 @@ export default function App() {
           <Typography variant="h6" sx={{ mt: 1, mb: 2 }}>Crude Oil Price</Typography>
           {loading ? <CircularProgress size={24} sx={{ color: '#39FF14' }} /> : (
             <Box>
-              <Typography variant="h4" sx={neonText}>TT$ {ttdConversionOil}</Typography>
-              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)', display: 'block' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Typography variant="h4" sx={neonText}>TT$ {ttdConversionOil}</Typography>
+                <InlineTrendArrow trend={oilTrend} />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)', display: 'block', mt: 0.5 }}>
                 Per Barrel (USD ${globalPrice})
               </Typography>
-              <TrendIndicator trend={oilTrend} />
+              {oilTrend.prevPrice !== null && (
+                <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.3)', display: 'block' }}>
+                  Last recorded: USD ${oilTrend.prevPrice}
+                </Typography>
+              )}
             </Box>
           )}
         </CardContent>
@@ -206,11 +206,18 @@ export default function App() {
           <Typography variant="h6" sx={{ mt: 1, mb: 2 }}>Natural Gas Price</Typography>
           {loading ? <CircularProgress size={24} sx={{ color: '#39FF14' }} /> : (
             <Box>
-              <Typography variant="h4" sx={neonText}>TT$ {ttdConversionGas}</Typography>
-              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)', display: 'block' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Typography variant="h4" sx={neonText}>TT$ {ttdConversionGas}</Typography>
+                <InlineTrendArrow trend={gasTrend} />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.4)', display: 'block', mt: 0.5 }}>
                 Per MMBtu (USD ${gasPrice})
               </Typography>
-              <TrendIndicator trend={gasTrend} />
+              {gasTrend.prevPrice !== null && (
+                <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.3)', display: 'block' }}>
+                  Last recorded: USD ${gasTrend.prevPrice}
+                </Typography>
+              )}
             </Box>
           )}
         </CardContent>

@@ -11,67 +11,86 @@ export default function App() {
   const [gasTrend, setGasTrend] = useState({ direction: 'stable', prevPrice: null });
 
   useEffect(() => {
-    const CACHE_KEY = 'energy_dashboard_cache';
-    const SIX_HOURS = 6 * 60 * 60 * 1000; 
-    const now = Date.now();
+  const CACHE_KEY = 'energy_dashboard_cache';
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  const now = Date.now();
 
-    const savedCache = localStorage.getItem(CACHE_KEY);
-    const cache = savedCache ? JSON.parse(savedCache) : null;
+  let cache = null;
+  try {
+    const saved = localStorage.getItem(CACHE_KEY);
+    if (saved) cache = JSON.parse(saved);
+  } catch (e) {
+    console.error('Cache parse error:', e);
+  }
 
-    if (cache && (now - cache.timestamp < SIX_HOURS)) {
-      setGlobalPrice(cache.oil);
-      setGasPrice(cache.gas);
-      setOilTrend({ direction: cache.oilTrend || 'stable', prevPrice: cache.prevOil || null });
-      setGasTrend({ direction: cache.gasTrend || 'stable', prevPrice: cache.prevGas || null });
-      setLoading(false);
-      console.log("Loading data from cache to save API credits...");
-    } else {
-      console.log("Cache expired or missing. Fetching new data...");
-      
-      fetch('/.netlify/functions/get-prices')
-      .then(res => res.json())
-      .then(data => {
-        const oilP = data.oil || 0;
-        const gasP = data.gas || 0;
+  const cacheValid = cache && (now - cache.timestamp < SIX_HOURS);
 
-        let newOilDirection = 'stable';
-        let newGasDirection = 'stable';
-        let prevOilVal = null;
-        let prevGasVal = null;
+  if (cacheValid) {
+    setGlobalPrice(cache.oil);
+    setGasPrice(cache.gas);
+    setOilTrend({ direction: cache.oilTrend || 'stable', prevPrice: cache.prevOil ?? null });
+    setGasTrend({ direction: cache.gasTrend || 'stable', prevPrice: cache.prevGas ?? null });
+    setLoading(false);
+    console.log('Loaded from cache.');
+    return; // ← important: don't fall through
+  }
 
-        if (cache) {
-          prevOilVal = cache.oil;
-          prevGasVal = cache.gas;
+  console.log('Cache expired or missing. Fetching fresh data...');
 
-          if (oilP > cache.oil) newOilDirection = 'up';
-          if (oilP < cache.oil) newOilDirection = 'down';
-          
-          if (gasP > cache.gas) newGasDirection = 'up';
-          if (gasP < cache.gas) newGasDirection = 'down';
-        }
+  fetch('/.netlify/functions/get-prices')
+    .then(res => res.json())
+    .then(data => {
+      const oilP = parseFloat(data.oil) || 0;
+      const gasP = parseFloat(data.gas) || 0;
 
-        setGlobalPrice(oilP);
-        setGasPrice(gasP);
-        setOilTrend({ direction: newOilDirection, prevPrice: prevOilVal });
-        setGasTrend({ direction: newGasDirection, prevPrice: prevGasVal });
+      // prevPrice = what was in cache BEFORE this fetch (the previous period's price)
+      const prevOilVal = cache?.oil ?? null;
+      const prevGasVal = cache?.gas ?? null;
 
+      const newOilDir =
+        prevOilVal === null ? 'stable'
+        : oilP > prevOilVal ? 'up'
+        : oilP < prevOilVal ? 'down'
+        : 'stable';
+
+      const newGasDir =
+        prevGasVal === null ? 'stable'
+        : gasP > prevGasVal ? 'up'
+        : gasP < prevGasVal ? 'down'
+        : 'stable';
+
+      setGlobalPrice(oilP);
+      setGasPrice(gasP);
+      setOilTrend({ direction: newOilDir, prevPrice: prevOilVal });
+      setGasTrend({ direction: newGasDir, prevPrice: prevGasVal });
+
+      try {
         localStorage.setItem(CACHE_KEY, JSON.stringify({
           oil: oilP,
           gas: gasP,
-          oilTrend: newOilDirection,
-          gasTrend: newGasDirection,
-          prevOil: prevOilVal,
+          oilTrend: newOilDir,
+          gasTrend: newGasDir,
+          prevOil: prevOilVal,  // store what the OLD price was, not the new one
           prevGas: prevGasVal,
-          timestamp: now
+          timestamp: now,
         }));
+      } catch (e) {
+        console.error('Cache write error:', e);
+      }
 
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Fetch error:", err);
-        setLoading(false);
-      });
-    }
+      setLoading(false);
+    })
+    .catch(err => {
+      console.error('Fetch error:', err);
+      // Fall back to stale cache if available
+      if (cache) {
+        setGlobalPrice(cache.oil);
+        setGasPrice(cache.gas);
+        setOilTrend({ direction: cache.oilTrend || 'stable', prevPrice: cache.prevOil ?? null });
+        setGasTrend({ direction: cache.gasTrend || 'stable', prevPrice: cache.prevGas ?? null });
+      }
+      setLoading(false);
+    });
   }, []);
 
   // Conversions
